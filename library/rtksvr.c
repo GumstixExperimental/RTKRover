@@ -493,7 +493,7 @@ static void *rtksvrthread(void *arg)
 * args   : rtksvr_t *svr    IO rtk server
 * return : status (0:error,1:ok)
 *-----------------------------------------------------------------------------*/
-extern int rtksvrinit(rtksvr_t *svr)
+int rtksvrinit(rtksvr_t *svr)
 {
     gtime_t time0={0};
     sol_t  sol0 ={{0}};
@@ -501,7 +501,7 @@ extern int rtksvrinit(rtksvr_t *svr)
     geph_t geph0={0,-1};
     seph_t seph0={0};
     int i,j;
-    
+    printf("linked");
     tracet(3,"rtksvrinit:\n");
     
     svr->state=svr->cycle=svr->nmeacycle=svr->nmeareq=0;

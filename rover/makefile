@@ -130,5 +130,5 @@ test3:
 	./roverRcv -o ../rtk_pb.conf
 
 clean:
-	rm -f roverRcv roverRcv.exe roverRcv.nav *.o *.out *.trace
+	rm -f roverRcv roverRcv.exe rover.nav *.o *.out *.trace
 
