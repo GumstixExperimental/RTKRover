@@ -182,7 +182,7 @@ static void readcmd(const char *file, char *cmd, int type)
     fclose(fp);
 }
 /* rover comm function -KL----------------------------------------------------*/
-int roverComm(fd_set *fds, int sockfd, roverMsg *msg FILE *fp_waypt)
+int roverComm(fd_set *fds, int sockfd, roverMsg *msg, FILE *fp_waypt)
 {
 }
 /* str2str -------------------------------------------------------------------*/
@@ -201,8 +201,9 @@ int main(int argc, char **argv)
     int bps[MAXSTR]={0},fmts[MAXSTR]={0},sta=0;
     
     int ctl_port=2097;
+    char ctl_buffer[256];
     char *nodefile;
-    int sockfd,
+    int sockfd;
 	char *rip;
 	struct sockaddr_in serv_addr;
     rip=ctl_buffer;
@@ -270,8 +271,6 @@ int main(int argc, char **argv)
     FD_ZERO(&sockset);
     FD_SET(sockfd, &sockset);
     
-	if(connect(sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr))<0)
-		fprintf(stderr,"error connecting\n");
     
     for (i=0;i<n;i++) {
         if (fmts[i+1]<=0) continue;
@@ -323,6 +322,14 @@ int main(int argc, char **argv)
         fprintf(stderr,"stream server start error\n");
         return -1;
     }
+    
+    // Socket server start
+    if(connect(sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr))<0)
+		fprintf(stderr,"error connecting\n");
+	if (bind(sockfd, (struct sockaddr *) &serv_addr,
+          sizeof(serv_addr)) < 0) 
+          fprintf(stderr,"ERROR on binding");
+          
     for (intrflg=0;!intrflg;) {
         
         /* get stream server status */
