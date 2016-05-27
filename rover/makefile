@@ -9,7 +9,8 @@ SRC    = ../library
 
 CFLAGS = -Wall -O3 -ansi -pedantic -Wno-unused-but-set-variable -I$(SRC) -I. -DTRACE $(CTARGET) -g
 LDLIBS  = -lm -lrt -lpthread
-
+shared: roverRcv.o vt.o
+	$(CC) $(CFLAGS) roverRcv.o vt.o -o RoverRcv -lrtk $(LDLIBS)
 all        : roverRcv
 roverRcv     : roverRcv.o vt.o rtkcmn.o rtksvr.o rtkpos.o geoid.o solution.o lambda.o
 roverRcv     : sbas.o stream.o rcvraw.o rtcm.o preceph.o options.o pntpos.o ppp.o ppp_ar.o

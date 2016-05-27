@@ -7,6 +7,7 @@
 * RoverRcv developed by Keith.Lee.at.Gumstix.com
 *-----------------------------------------------------------------------------*/
 #include <signal.h>
+#include <sys/select.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -180,6 +181,17 @@ static opt_t rcvopts[]={
     
     {"",0,NULL,""}
 };
+
+/* Rover communication struct ------------------------------------------------*/
+typedef struct roverMsg_t{
+	char data_flag;
+	float lat;
+	float lon;
+	float hdg;
+	float spd;
+	int error;
+}roverMsg;
+
 
 /* external stop signal ------------------------------------------------------*/
 static void sigshut(int sig)
@@ -1192,6 +1204,14 @@ static int cmd_exec(const char *cmd, vt_t *vt)
 /* command interpreter -------------------------------------------------------*/
 static void cmdshell(vt_t *vt)
 {
+	struct sockaddr_in svr_addr;
+	int sockfd;
+	fd_set sockset;
+	roverMsg rmsg;
+	svr_addr.sin_family=AF_INET;
+	inet_aton(baseip, &svr_addr.sin_addr);
+	svr_addr.sin_port=htons(baseport);
+	
     const char *cmds[]={
         "start","stop","restart","solution","status","satellite","observ",
         "navidata","stream","error","option","set","load","save","log","help",
@@ -1360,7 +1380,7 @@ static void cmdshell(vt_t *vt)
 int main(int argc, char **argv)
 {
 	printf("start\n");
-	
+		
     vt_t vt={0};
     int i,start=0,port=0,outstat=0,trace=0;
     char *dev="",file[MAXSTR]="";
@@ -1426,6 +1446,8 @@ int main(int argc, char **argv)
     signal(SIGHUP ,SIG_IGN);
     signal(SIGPIPE,SIG_IGN);
     printf("startsvr\n");
+    
+    
     
     while (!intflg) {
         
