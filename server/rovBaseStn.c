@@ -1,40 +1,68 @@
 /*------------------------------------------------------------------------------
-* rovServer.c : Rover remote control application based on RTKLIB's str2str.c, 
-*		console version of stream server
+* str2str.c : console version of stream server
 *
-*          RTKLIB Copyright (C) 2007-2015 by T.TAKASU, All rights reserved.
-* rovServer developed by Keith.Lee.at.Gumstix.com
+*          Copyright (C) 2007-2015 by T.TAKASU, All rights reserved.
+*
+* version : $Revision: 1.1 $ $Date: 2008/07/17 21:54:53 $
+* history : 2009/06/17  1.0  new
+*           2011/05/29  1.1  add -f, -l and -x option
+*           2011/11/29  1.2  fix bug on recognize ntrips:// (rtklib_2.4.1_p4)
+*           2012/12/25  1.3  add format conversion functions
+*                            add -msg, -opt and -sta options
+*                            modify -p option
+*           2013/01/25  1.4  fix bug on showing message
+*           2014/02/21  1.5  ignore SIG_HUP
+*           2014/08/10  1.5  fix bug on showing message
+*           2014/08/26  1.6  support input format gw10, binex and rt17
+*           2014/10/14  1.7  use stdin or stdout if option -in or -out omitted
+*           2014/11/08  1.8  add option -a, -i and -o
+*           2015/03/23  1.9  fix bug on parsing of command line options
 *-----------------------------------------------------------------------------*/
 #include <signal.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <stdio.h>
 #include "rtklib.h"
+#include "sockets.h"
+#include "csvparser.h"
+#include "xtdio.h"
+#include <sys/time.h>
+
 
 static const char rcsid[]="$Id:$";
 
-#define PRGNAME     "rovServer"          /* program name */
+#define PRGNAME     "str2str"          /* program name */
 #define MAXSTR      5                  /* max number of streams */
 #define MAXRCVCMD   4096               /* max length of receiver command */
-#define TRFILE      "rovServer.trace"    /* trace file */
+#define TRFILE      "str2str.trace"    /* trace file */
+
+#define MAXSOCKNAME 128
+#define DEBUG 1
 
 /* global variables ----------------------------------------------------------*/
 static strsvr_t strsvr;                /* stream server */
 static volatile int intrflg=0;         /* interrupt flag */
-typedef struct roverMsg_t{
-	char data_flag;
+
+//RTKROV
+Socket *sockcli;
+char svrname[MAXSOCKNAME];
+FILE *nodes_p, *log_p;
+float **nodes;
+int curr_node;
+typedef struct rovMsg_t{
+	char msgType;
 	float lat;
 	float lon;
 	float hdg;
-	float spd;
-	int error;
-}roverMsg;
+	float angle;
+	int errorType;
+	}rovMsg;
+
+
 
 /* help text -----------------------------------------------------------------*/
 static const char *help[]={
 "",
-" usage: rovServer [-in stream] [-out stream [-out stream...]] [options] -rip ip_addr -port ctl-port -nodefile filename",
+" usage: str2str [-in stream] [-out stream [-out stream...]] [options]",
 "",
 " Input data from a stream and divide and output them to multiple streams",
 " The input stream can be serial, tcp client, tcp server, ntrip client, or",
@@ -90,12 +118,15 @@ static const char *help[]={
 " -l  local_dir     ftp/http local directory []",
 " -x  proxy_addr    http/ntrip proxy address [no]",
 " -t  level         trace level [0]",
+//RTKROV
+" -sn  name host	Server socket name",
+" -nf  filename		GPS node list file",
+" -lf  filename		RTKRover log output file",
+
 " -h                print help",
-"",
-" -port	ctl_port	Rover control channel port",
-" -nodefile file	Path to gps node list",
-" -rip	ip_addr		Rover IP address"
 };
+
+
 /* print help ----------------------------------------------------------------*/
 static void printhelp(void)
 {
@@ -181,13 +212,164 @@ static void readcmd(const char *file, char *cmd, int type)
     }
     fclose(fp);
 }
-/* rover comm function -KL----------------------------------------------------*/
-int roverComm(fd_set *fds, int sockfd, roverMsg *msg, FILE *fp_waypt)
+
+//RTKROV
+/* getNodes ------------------------------------------------------------------*/
+int getNodes(char *filename)
 {
+	int n_nodes=0;
+	
+	char buf[1024];
+	
+	
+	while(!feof(nodes_p))
+	{
+		if(fgetc(nodes_p)=='\n')
+			n_nodes++;
+	}
+	rewind(nodes_p);
+	fprintf(stderr,"%d nodes\n",n_nodes);
+	
+	nodes = (float**)malloc(n_nodes*sizeof(float*));
+	int i;
+	for(i=0;i<n_nodes;i++)
+		nodes[i]=(float*)malloc(2*sizeof(float));
+	
+	CsvParser *csvparser = CsvParser_new(filename, ",", 0);
+	CsvRow *row;
+	i=0;
+	while(row = CsvParser_getRow(csvparser))
+	{
+		const char **rowFields = CsvParser_getFields(row);
+		if(CsvParser_getNumFields(row)==2)
+		{
+			nodes[i][0]=atof(rowFields[0]);
+			nodes[i][1]=atof(rowFields[1]);
+			i++;
+		}
+		else n_nodes--;
+	}
+#if DEBUG
+	for(i=0;i<n_nodes;i++)
+	{
+		fprintf(stderr, "%f, %f\n",nodes[i][0],nodes[i][1]);
+	}
+#endif
+	
+	return n_nodes;	
 }
+
+/* rovComm -------------------------------------------------------------------*/
+int rovComm()
+{
+	rovMsg rmsg;
+	rovMsg imsg;
+	char buf[1024];
+	char *tokens[12];
+	int i;
+	int j;
+	for(i=0;i<12;i++)
+		tokens[i]=NULL;
+		
+	Smasktime(0L,1L);
+	Smaskset(sockcli);
+	rmsg.msgType='x';
+	rmsg.lat=0.0;
+	rmsg.lon=0.0;
+	rmsg.hdg=0.0;
+	rmsg.angle=0.0;
+	rmsg.errorType=0;
+	
+	imsg.msgType='x';
+	imsg.lat=0.0;
+	imsg.lon=0.0;
+	imsg.hdg=0.0;
+	imsg.angle=0.0;
+	imsg.errorType=0;
+	
+	if(Smaskwait())
+	{
+		Sscanf(sockcli,"%s",buf);
+			fprintf(stderr, "%s\n", buf);
+		for(i=0;i<12;i++)
+		{
+			if(i==0)tokens[i]=strtok(buf, ":");
+			else tokens[i]=strtok(0,":");
+			if(tokens[i]==NULL)break;
+			#if DEBUG
+			fprintf(stderr,"%s\n",tokens[i]);
+			#endif
+		}
+		printf("%d\n",i);
+		
+		for(j=0;j<i;j++)
+		{
+			if(*tokens[j]=='t')
+			{
+				printf("%c is the value\n", tokens[j+1][0]);
+				rmsg.msgType=tokens[++j][0];
+				
+			}
+			else if(*tokens[j]=='a')
+			{
+			#ifdef DEBUG
+				printf("lat=%s\n",tokens[j+1]);
+			#endif
+				rmsg.lat=atof(tokens[++j]);
+			}
+			else if(*tokens[j]=='o')
+				rmsg.lon=atof(tokens[++j]);
+			else if(*tokens[j]=='h')
+				rmsg.hdg=atof(tokens[++j]);
+			else if(tokens[j]=="n")
+				rmsg.angle=atof(tokens[++j]);
+			else if(tokens[j]=="e")
+				rmsg.errorType=atoi(tokens[++j]);
+			
+			
+		}
+		#if DEBUG
+		fprintf(stderr, "lat=%f\nlon=%f\nhdg=%f\n",rmsg.lat, rmsg.lon, rmsg.hdg);
+		fprintf(stderr, "into switch.  MSG TYPE=%c\n",rmsg.msgType);
+		#endif
+		switch(rmsg.msgType)
+			{
+			case 'i': //idle
+				
+				break;
+			case 'y': //confirm
+				
+				break;
+			case 'w': //waypoint
+			
+				break;
+			case 'e': //error
+				
+				break;
+			default:
+				
+				break;
+			}
+	}
+	
+
+	return 0;
+	
+}
+
+
+
 /* str2str -------------------------------------------------------------------*/
 int main(int argc, char **argv)
 {
+//RTKROV
+	curr_node=0;
+	sockcli=NULL;
+	log_p=0;
+	nodes_p=0;
+	struct timeval t1,t2;
+	double elapsedTime;
+	
     static char cmd[MAXRCVCMD]="";
     const char ss[]={'E','-','W','C','C'};
     strconv_t *conv[MAXSTR]={NULL};
@@ -199,18 +381,10 @@ int main(int argc, char **argv)
     int i,j,n=0,dispint=5000,trlevel=0,opts[]={10000,10000,2000,32768,10,0,30};
     int types[MAXSTR]={STR_FILE,STR_FILE},stat[MAXSTR]={0},byte[MAXSTR]={0};
     int bps[MAXSTR]={0},fmts[MAXSTR]={0},sta=0;
-    
-    int ctl_port=2097;
-    char ctl_buffer[256];
-    char *nodefile;
-    int sockfd;
-	char *rip;
-	struct sockaddr_in serv_addr;
-    rip=ctl_buffer;
-    fd_set sockset; 
-    roverMsg rmsg;
+    int n_nodes;
     
     for (i=0;i<MAXSTR;i++) paths[i]=s[i];
+    
     
     for (i=1;i<argc;i++) {
         if (!strcmp(argv[i],"-in")&&i+1<argc) {
@@ -245,32 +419,28 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i],"-l"  )&&i+1<argc) local=argv[++i];
         else if (!strcmp(argv[i],"-x"  )&&i+1<argc) proxy=argv[++i];
         else if (!strcmp(argv[i],"-t"  )&&i+1<argc) trlevel=atoi(argv[++i]);
+       
+        //RTKROV
+       
+       
+       
+        else if (!strcmp(argv[i],"-sn")  &&i+1<argc)
+        {
+        	sprintf(svrname, "%s", argv[++i]);
+        }
+        else if (!strcmp(argv[i],"-nf")  &&i+1<argc)
+        {
+        	nodes_p=fopen(argv[i+1], "r");
+        	n_nodes=getNodes(argv[++i]);
+        	fclose(nodes_p);
+        }
+        else if (!strcmp(argv[i],"-lf") &&i+1<argc)
+        	log_p=fopen(argv[++i], "w");
         
-        else if (!strcmp(argv[i],"-port")&&i+1<argc) ctl_port=atoi(argv[++i]);
-        else if (!strcmp(argv[i], "-nodefile")&& i+1<argc) nodefile=argv[++i];
-        else if (!strcmp(argv[i], "-rip")&&i+1<argc) rip=argv[++i];
         
         else if (*argv[i]=='-') printhelp();
     }
     if (n<=0) n=1; /* stdout */
-    fprintf(stderr,"argv parsed\n");
-    if(rip==ctl_buffer)
-    {
-    	fprintf(stderr, "No rover ip address\n");
-    	return(-1);
-    }
-    
-	serv_addr.sin_family=AF_INET;
-	inet_aton(rip, &serv_addr.sin_addr);
-	serv_addr.sin_port=htons(ctl_port);
-	
-	sockfd=socket(AF_INET,SOCK_STREAM, 0);
-	if (sockfd < 0) 
-        fprintf(stderr,"ERROR opening socket\n");
-        
-    FD_ZERO(&sockset);
-    FD_SET(sockfd, &sockset);
-    
     
     for (i=0;i<n;i++) {
         if (fmts[i+1]<=0) continue;
@@ -301,6 +471,7 @@ int main(int argc, char **argv)
     }
     signal(SIGTERM,sigfunc);
     signal(SIGINT ,sigfunc);
+    signal(SIGKILL,sigfunc);
     signal(SIGHUP ,SIG_IGN);
     signal(SIGPIPE,SIG_IGN);
     
@@ -323,15 +494,35 @@ int main(int argc, char **argv)
         return -1;
     }
     
-    // Socket server start
-    if(connect(sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr))<0)
-		fprintf(stderr,"error connecting\n");
-	if (bind(sockfd, (struct sockaddr *) &serv_addr,
-          sizeof(serv_addr)) < 0) 
-          fprintf(stderr,"ERROR on binding");
-          
+//RTKROV
+    if(strlen(svrname)>1)
+	{
+		do
+		{
+			sockcli=Sopen(svrname, "c");
+			if(!sockcli)sleep(1);
+		}while(!sockcli);
+	}
+    gettimeofday(&t2, NULL);
+    gettimeofday(&t1, NULL);
+    
+    
+    
+    
+    
     for (intrflg=0;!intrflg;) {
-        
+    
+    
+    //RTKROV
+    gettimeofday(&t2,NULL);
+    elapsedTime=(t2.tv_sec - t1.tv_sec) *1000.0;
+    elapsedTime+=(t2.tv_usec - t1.tv_usec) / 1000.0;
+    
+    if(elapsedTime>=dispint)
+    { 
+    
+    
+    
         /* get stream server status */
         strsvrstat(&strsvr,stat,byte,bps,strmsg);
         
@@ -341,9 +532,20 @@ int main(int argc, char **argv)
         fprintf(stderr,"%s [%s] %10d B %7d bps %s\n",
                 time_str(utc2gpst(timeget()),0),buff,byte[0],bps[0],strmsg);
         
-        sleepms(dispint);
+//RTKROV
+		gettimeofday(&t1, NULL);
+	}
+        rovComm();
+        
     }
     if (*cmdfile) readcmd(cmdfile,cmd,1);
+    
+//RTKROV
+    Sclose(sockcli);
+    if(log_p)fclose(log_p);
+    
+    
+    
     
     /* stop stream server */
     strsvrstop(&strsvr,*cmd?cmd:NULL);

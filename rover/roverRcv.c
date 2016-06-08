@@ -1,33 +1,51 @@
 /*------------------------------------------------------------------------------
-* roverRcv.c : Rover controller based on RTKLIB rtkrcv.c rtk-gps/gnss receiver 
-*		console ap
+* rtkrcv.c : rtk-gps/gnss receiver console ap
 *
-*          RTKLIB Copyright (C) 2009-2015 by T.TAKASU, All rights reserved.
+*          Copyright (C) 2009-2015 by T.TAKASU, All rights reserved.
 *
-* RoverRcv developed by Keith.Lee.at.Gumstix.com
+* notes   :
+*     current version does not support win32 without pthread library
+*
+* version : $Revision:$ $Date:$
+* history : 2009/12/13 1.0  new
+*           2010/07/18 1.1  add option -m
+*           2010/08/12 1.2  fix bug on ftp/http
+*           2011/01/22 1.3  add option misc-proxyaddr,misc-fswapmargin
+*           2011/08/19 1.4  fix bug on size of arg solopt arg for rtksvrstart()
+*           2012/11/03 1.5  fix bug on setting output format
+*           2013/06/30 1.6  add "nvs" option for inpstr*-format
+*           2014/02/10 1.7  fix bug on printing obs data
+*                           add print of status, glonass nav data
+*                           ignore SIGHUP
+*           2014/04/27 1.8  add "binex" option for inpstr*-format
+*           2014/08/10 1.9  fix cpu overload with abnormal telnet shutdown
+*           2014/08/26 1.10 support input format "rt17"
+*                           change file paths of solution status and debug trace
+*           2015/01/10 1.11 add line editting and command history
+*                           separate codes for virtual console to vt.c
 *-----------------------------------------------------------------------------*/
 #include <signal.h>
-#include <sys/select.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <unistd.h>
+#include <stdio.h>
 #include "rtklib.h"
+#include "sockets.h"
+#include "xtdio.h"
 #include "vt.h"
+#include "csvparser.h"
 
 static const char rcsid[]="$Id:$";
 
 #define PRGNAME     "roverRcv"            /* program name */
-#define CMDPROMPT   "rover> "          /* command prompt */
+#define CMDPROMPT   "rovrcv> "          /* command prompt */
 #define MAXARG      10                  /* max number of args in a command */
 #define MAXCMD      256                 /* max length of a command */
 #define MAXSTR      1024                /* max length of a stream */
 #define MAXRCVCMD   4096                /* max receiver command */
 #define OPTSDIR     "."                 /* default config directory */
-#define OPTSFILE    "rover.conf"       /* default config file */
-#define NAVIFILE    "rover.nav"        /* navigation save file */
-#define STATFILE    "rover_%Y%m%d%h%M.stat"  /* solution status file */
-#define TRACEFILE   "rover_%Y%m%d%h%M.trace" /* debug trace file */
+#define OPTSFILE    "rovrcv.conf"       /* default config file */
+#define NAVIFILE    "rovrcv.nav"        /* navigation save file */
+#define STATFILE    "rovrcv_%Y%m%d%h%M.stat"  /* solution status file */
+#define TRACEFILE   "rovrcv_%Y%m%d%h%M.trace" /* debug trace file */
 #define INTKEEPALIVE 1000               /* keep alive interval (ms) */
 
 #define ESC_CLEAR   "\033[2J"           /* ansi/vt100: erase screen */
@@ -75,13 +93,32 @@ static int moniport     =0;             /* monitor port */
 static int keepalive    =0;             /* keep alive flag */
 static int fswapmargin  =30;            /* file swap margin (s) */
 
-static char baseip[15] 	="";			/* base station ip for roverRcv */
-static int baseport
-		=0;				/* base station tcp port for roverRcv */
-
 static prcopt_t prcopt;                 /* processing options */
 static solopt_t solopt[2]={{0}};        /* solution options */
 static filopt_t filopt  ={""};          /* file options */
+
+
+
+
+
+
+/* RTKROV --------------------------------------------------------------------*/
+#define SVRNAME "rtkrov"
+#define DEBUG 1
+Socket *socksvr, *skt;
+typedef struct rovMsg_t{
+	char msgType;
+	float lat;
+	float lon;
+	float hdg;
+	float angle;
+	int errorType;
+	}rovMsg;
+
+
+
+
+
 
 /* help text -----------------------------------------------------------------*/
 static const char *helptxt[]={
@@ -176,23 +213,9 @@ static opt_t rcvopts[]={
     {"file-cmdfile2",   2,  (void *)rcvcmds[1],          ""     },
     {"file-cmdfile3",   2,  (void *)rcvcmds[2],          ""     },
     
-    {"baseStn-ip",		2,	(void *)&baseip,			""		},
-    {"baseStn-port",	0,	(void *)&baseport,			""		},
     
     {"",0,NULL,""}
 };
-
-/* Rover communication struct ------------------------------------------------*/
-typedef struct roverMsg_t{
-	char data_flag;
-	float lat;
-	float lon;
-	float hdg;
-	float spd;
-	int error;
-}roverMsg;
-
-
 /* external stop signal ------------------------------------------------------*/
 static void sigshut(int sig)
 {
@@ -1201,17 +1224,44 @@ static int cmd_exec(const char *cmd, vt_t *vt)
     }
     return ret;
 }
+
+
+/* RTKROV --------------------------------------------------------------------*/
+int rovComm()
+{
+	int i, retval;
+	double pos[2];
+	#if DEBUG
+	retval=1;
+	Sprintf(skt,"t:r:a:1.23:o:4.32");
+	#else
+	rtksvrlock(&svr);
+	if(svr.nsol==0) return 0;
+	else retval=svr.nsol;
+	
+	for (i=0;i<svr.nsol;i++)
+	{
+		ecef2pos(svr.solbuf[i].rr,pos);
+		Sprintf(skt,"t:i:a:%f:o:%f",pos[0],pos[1]);
+	}
+	svr.nsol=0;
+	rtksvrunlock(&svr);
+	#endif
+	return retval;
+}
+
+int rovCtl()
+{
+	return 0;
+}
+
+
+
+
+
 /* command interpreter -------------------------------------------------------*/
 static void cmdshell(vt_t *vt)
 {
-	struct sockaddr_in svr_addr;
-	int sockfd;
-	fd_set sockset;
-	roverMsg rmsg;
-	svr_addr.sin_family=AF_INET;
-	inet_aton(baseip, &svr_addr.sin_addr);
-	svr_addr.sin_port=htons(baseport);
-	
     const char *cmds[]={
         "start","stop","restart","solution","status","satellite","observ",
         "navidata","stream","error","option","set","load","save","log","help",
@@ -1223,18 +1273,18 @@ static void cmdshell(vt_t *vt)
     trace(3,"cmdshell:\n");
     
     while (!intflg) {
-        
-        /* output prompt */
+        rovComm();
+        /* output prompt
         if (!vt_printf(vt,"%s",CMDPROMPT)) break;
         
-        /* input command */
+        /* input command
         if (!vt_gets(vt,buff,sizeof(buff))) break;
         
-        if (buff[0]=='!') { /* shell escape */
+        if (buff[0]=='!') { /* shell escape 
             cmd_exec(buff+1,vt);
             continue;
         }
-        /* parse command */
+        /* parse command
         narg=0;
         for (p=strtok(buff," \t\n");p&&narg<MAXARG;p=strtok(NULL," \t\n")) {
             args[narg++]=p;
@@ -1263,15 +1313,17 @@ static void cmdshell(vt_t *vt)
             case 15: cmd_help     (args,narg,vt); break;
             case 16: cmd_help     (args,narg,vt); break;
             case 17: if (vt->type) return;        break;
-            case 18:              /* shutdown */
+            case 18:              /* shutdown 
                 vt_printf(vt,"shutdown %s process ? (y/n): ",PRGNAME);
                 if (!vt_gets(vt,buff,sizeof(buff))||vt->brk) continue;
                 if (toupper((int)buff[0])=='Y') intflg=1;
                 break;
             default:
                 vt_printf(vt,"unknown command: %s.\n",args[0]);
-                break;
-        }
+                break; 
+                
+        }*/
+        sleep(1); 
     }
     trace(3,"cmdshell: exit\n");
 }
@@ -1379,8 +1431,6 @@ static void cmdshell(vt_t *vt)
 *-----------------------------------------------------------------------------*/
 int main(int argc, char **argv)
 {
-	printf("start\n");
-		
     vt_t vt={0};
     int i,start=0,port=0,outstat=0,trace=0;
     char *dev="",file[MAXSTR]="";
@@ -1399,27 +1449,18 @@ int main(int argc, char **argv)
         traceopen(TRACEFILE);
         tracelevel(trace);
     }
-    printf("args: %d:%d\n", &svr, &*rtksvrinit);
-    
     /* initialize rtk server and monitor port */
-
     rtksvrinit(&svr);
-    printf("1");
     strinit(&moni);
-    
-    printf("svrinit\n");
     
     /* load options file */
     if (!*file) sprintf(file,"%s/%s",OPTSDIR,OPTSFILE);
-    
-    printf("opts\n");
     
     resetsysopts();
     if (!loadopts(file,rcvopts)||!loadopts(file,sysopts)) {
         fprintf(stderr,"no options file: %s. defaults used\n",file);
     }
     getsysopts(&prcopt,solopt,&filopt);
-    printf("sysopts\n");
     
     /* read navigation data */
     if (!readnav(NAVIFILE,&svr.nav)) {
@@ -1428,25 +1469,32 @@ int main(int argc, char **argv)
     if (outstat>0) {
         rtkopenstat(STATFILE,outstat);
     }
-    printf("navdata\n");
-    
     /* open monitor port */
     if (moniport>0&&!openmoni(moniport)) {
         fprintf(stderr,"monitor port open error: %d\n",moniport);
         return -1;
     }
-    printf("monport\n");
-    
     /* start rtk server */
     if (start&&!startsvr(&vt)) return -1;
     
     signal(SIGINT, sigshut);    /* keyboard interrupt */
     signal(SIGTERM,sigshut);    /* external shutdown signal */
     signal(SIGUSR2,sigshut);
+    signal(SIGKILL,sigshut);
     signal(SIGHUP ,SIG_IGN);
     signal(SIGPIPE,SIG_IGN);
-    printf("startsvr\n");
     
+    
+    /* RTKROV ------------------------------------------------------*/
+    do
+    {
+    	socksvr=Sopen(SVRNAME, "S");
+    }while(!socksvr);
+    Swait(socksvr);
+    skt=Saccept(socksvr);
+    #if DEBUG
+    Sprintf(skt, "t:i");
+    #endif
     
     
     while (!intflg) {
@@ -1466,8 +1514,13 @@ int main(int argc, char **argv)
     /* stop rtk server */
     stopsvr(&vt);
     
-    printf("stopsvr\n"); 
     
+    
+    /* RTKROV ------------------------------------------------------*/
+ 	Sclose(socksvr);
+ 
+ 
+ 
     if (moniport>0) closemoni();
     
     if (outstat>0) rtkclosestat();

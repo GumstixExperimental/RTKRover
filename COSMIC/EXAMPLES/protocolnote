@@ -1,0 +1,37 @@
+                                   --------
+								   Protocol
+                                   --------
+
+Sender:                           Receiver:
+ int ok;                           if(!Sgets(msg,maxmsg,skt)) {...error ..}
+ Sputs(msg,skt);                   Swrite(skt,1,sizeof(int));
+ Sreadbytes(skt,&ok,sizeof(ok));
+
+
+With this scheme, the sender sends a message but blocks until the receiver has
+gotten the message and sent back an acknowledgement in the form of an integer.
+
+ ---------------------------------------------------------------------
+
+An alternative approach is to use the <multiskt.c> example.  Extend the
+sktlist_str to look like:
+
+	struct sktlist_str {
+	    int      id;
+		int      ok;
+	    Socket  *skt;
+	    SktList *nxt,*prv;
+	    };
+
+and then initialize the "ok" with a 1.  The server, before sending messages to
+the client, checks if its ok:
+
+	if(sktlist->ok) {
+		Sputs(msg,skt);
+		sktlist->ok= 0;
+		}
+
+Clients, when they receive a message, send a 1 back to the server,
+acknowledging receipt of the message.  The server code then sets that
+sktlist->ok to 1, thus permitting a subsequent message to be issued to
+that client.

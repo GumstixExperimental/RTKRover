@@ -7,10 +7,10 @@ SRC    = ../library
 #CTARGET= -mfpu=neon -ffast-math
 #CTARGET= -DENAGLO -DENAQZS -DENACMP -DNFREQ=3
 
-CFLAGS = -Wall -O3 -ansi -pedantic -Wno-unused-but-set-variable -I$(SRC) -I. -DTRACE $(CTARGET) -g
+CFLAGS = -Wall -O3 -ansi -pedantic -Wno-unused-but-set-variable -I$(SRC) -I./ -I../HDR -DTRACE $(CTARGET) -g
 LDLIBS  = -lm -lrt -lpthread
 shared: roverRcv.o vt.o
-	$(CC) $(CFLAGS) roverRcv.o vt.o -o RoverRcv -lrtk $(LDLIBS)
+	$(CC) $(CFLAGS) roverRcv.o vt.o ../simpleskts.a -o RoverRcv -lrtk $(LDLIBS)
 all        : roverRcv
 roverRcv     : roverRcv.o vt.o rtkcmn.o rtksvr.o rtkpos.o geoid.o solution.o lambda.o
 roverRcv     : sbas.o stream.o rcvraw.o rtcm.o preceph.o options.o pntpos.o ppp.o ppp_ar.o
@@ -18,7 +18,7 @@ roverRcv     : novatel.o ublox.o ss2.o crescent.o skytraq.o gw10.o javad.o nvs.o
 roverRcv     : rt17.o ephemeris.o rinex.o ionex.o rtcm2.o rtcm3.o rtcm3e.o qzslex.o
 
 roverRcv.o   : roverRcv.c
-	$(CC) -c $(CFLAGS) roverRcv.c
+	$(CC) -c $(CFLAGS) roverRcv.c 
 vt.o       : vt.c
 	$(CC) -c $(CFLAGS) vt.c
 rtkcmn.o   : $(SRC)/rtkcmn.c
@@ -131,5 +131,5 @@ test3:
 	./roverRcv -o ../rtk_pb.conf
 
 clean:
-	rm -f roverRcv roverRcv.exe rover.nav *.o *.out *.trace
+	rm -f RoverRcv *.nav *.o *.out *.trace
 
