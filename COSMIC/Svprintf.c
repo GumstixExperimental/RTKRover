@@ -50,11 +50,9 @@ if(!skt) {
 	return 0;
 	}
 
-#ifdef AS400
-ret= vsprintf(buf,fmt,__va_list args);
-#else
-ret= vsprintf(buf,fmt,(void *) args);
-#endif
+
+ret= sprintf(buf,fmt,args);
+
 Swrite(skt,buf,strlen(buf)+1);	/* send the null byte, too */
 
 return ret;

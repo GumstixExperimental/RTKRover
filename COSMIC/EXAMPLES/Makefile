@@ -10,7 +10,7 @@ EXES=smsrvr smclient multiskt sktpoll talksrvr talkclient sktsig oobrecv oobsend
 
 # to convert C into executables
 .c:
-	$(CC) $(CFLAGS) -I../HDR $(LDFLAGS) $< $(LOADLIBES) -o $@ ../simpleskts.a
+	$(CC) $(CFLAGS) -I../HDR $(LDFLAGS) $< $(LOADLIBES) -o $@ ../$(LIB)
 
 # make all executables
 all : $(EXES)

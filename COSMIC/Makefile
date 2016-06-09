@@ -41,7 +41,7 @@ OBJ = Saccept.o      Sprintf.o      Stest.o        outofmem.o     \
 	  Sinit.o
 
 # LIB: name of library
-LIB       = simpleskts.a
+LIB       ?= simpleskts.a
 
 # EXETGT: where to put executables, as seen from the viewpoint of the EXE
 #  subdirectory
@@ -63,7 +63,7 @@ LOADLIBES = ../$(LIB)
 all     : $(LIB) exes examples
 
 $(LIB)  : $(OBJ)
-	ar r simpleskts.a *.o
+	ar r $(LIB) *.o
 #	ranlib simpleskts.a
 #	/bin/rm -f *.o
 	@echo "finished updating simpleskts.a"
