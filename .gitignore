@@ -33,3 +33,23 @@
 
 # gedit backup files
 *~
+
+# repo-specific executables
+COSMIC/EXAMPLES/multiskt
+COSMIC/EXAMPLES/oobrecv
+COSMIC/EXAMPLES/oobsend
+COSMIC/EXAMPLES/sktpoll
+COSMIC/EXAMPLES/sktsig
+COSMIC/EXAMPLES/smclient
+COSMIC/EXAMPLES/smsrvr
+COSMIC/EXAMPLES/talkclient
+COSMIC/EXAMPLES/talksrvr
+COSMIC/EXE/Spm
+COSMIC/EXE/sktdbg
+COSMIC/EXE/spmchk
+COSMIC/EXE/spmtable
+COSMIC/EXE/spmsrvr
+
+# repo-specific log files
+*.log
+*.nav

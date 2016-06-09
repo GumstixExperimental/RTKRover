@@ -501,7 +501,7 @@ int main(int argc, char **argv)
 		{
 			sockcli=Sopen(svrname, "c");
 			if(!sockcli)sleep(1);
-		}while(!sockcli);
+		}while(!sockcli && !intrflg);
 	}
     gettimeofday(&t2, NULL);
     gettimeofday(&t1, NULL);

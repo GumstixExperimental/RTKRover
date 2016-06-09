@@ -220,7 +220,7 @@ static opt_t rcvopts[]={
 static void sigshut(int sig)
 {
     trace(3,"sigshut: sig=%d\n",sig);
-    
+    printf("^C :)\n");
     intflg=1;
 }
 /* discard space characters at tail ------------------------------------------*/
@@ -1233,13 +1233,14 @@ int rovComm()
 	double pos[2];
 	#if DEBUG
 	retval=1;
-	Sprintf(skt,"t:r:a:1.23:o:4.32");
+	if(!intflg && Stest(skt)>=0)
+		Sprintf(skt,"t:r:a:1.23:o:4.32");
 	#else
 	rtksvrlock(&svr);
 	if(svr.nsol==0) return 0;
 	else retval=svr.nsol;
 	
-	for (i=0;i<svr.nsol;i++)
+	for (i=0;i<svr.nsol && !intflg;i++)
 	{
 		ecef2pos(svr.solbuf[i].rr,pos);
 		Sprintf(skt,"t:i:a:%f:o:%f",pos[0],pos[1]);
@@ -1280,7 +1281,7 @@ static void cmdshell(vt_t *vt)
         /* input command
         if (!vt_gets(vt,buff,sizeof(buff))) break;
         
-        if (buff[0]=='!') { /* shell escape 
+        if (buff[0]=='!') { /* shell escape
             cmd_exec(buff+1,vt);
             continue;
         }
@@ -1313,7 +1314,7 @@ static void cmdshell(vt_t *vt)
             case 15: cmd_help     (args,narg,vt); break;
             case 16: cmd_help     (args,narg,vt); break;
             case 17: if (vt->type) return;        break;
-            case 18:              /* shutdown 
+            case 18:              /* shutdown
                 vt_printf(vt,"shutdown %s process ? (y/n): ",PRGNAME);
                 if (!vt_gets(vt,buff,sizeof(buff))||vt->brk) continue;
                 if (toupper((int)buff[0])=='Y') intflg=1;
@@ -1480,7 +1481,6 @@ int main(int argc, char **argv)
     signal(SIGINT, sigshut);    /* keyboard interrupt */
     signal(SIGTERM,sigshut);    /* external shutdown signal */
     signal(SIGUSR2,sigshut);
-    signal(SIGKILL,sigshut);
     signal(SIGHUP ,SIG_IGN);
     signal(SIGPIPE,SIG_IGN);
     
@@ -1489,32 +1489,20 @@ int main(int argc, char **argv)
     do
     {
     	socksvr=Sopen(SVRNAME, "S");
+    	if(intflg) return -1;
     }while(!socksvr);
     Swait(socksvr);
     skt=Saccept(socksvr);
-    #if DEBUG
-    Sprintf(skt, "t:i");
-    #endif
     
     
     while (!intflg) {
-        
-        /* open console */
-        if (!vt_open(&vt,port,dev)) break;
-        
-        vt_printf(&vt,"\n%s** %s ver.%s console (h:help) **%s\n",ESC_BOLD,
-                  PRGNAME,VER_RTKLIB,ESC_RESET);
-        
-        /* command interpreter */
-        if (login(&vt)) cmdshell(&vt);
-        
-        /* close console */
-        vt_close(&vt);
+        rovComm();
+       sleep(1);
     }
     /* stop rtk server */
-    stopsvr(&vt);
     
     
+    Sclose(skt);
     
     /* RTKROV ------------------------------------------------------*/
  	Sclose(socksvr);

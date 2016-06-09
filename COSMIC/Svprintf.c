@@ -50,9 +50,11 @@ if(!skt) {
 	return 0;
 	}
 
-
+#ifdef AS400
 ret= sprintf(buf,fmt,args);
-
+#else
+ret= sprintf(buf,fmt,args);
+#endif
 Swrite(skt,buf,strlen(buf)+1);	/* send the null byte, too */
 
 return ret;
