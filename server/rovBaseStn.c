@@ -43,17 +43,25 @@ static strsvr_t strsvr;                /* stream server */
 static volatile int intrflg=0;         /* interrupt flag */
 
 //RTKROV
+#define IDLE 	'i'
+#define REPORT 	'r'
+#define ERROR	'e'
+#define NOFIX	'n'
+#define WAYPT	'w'
+#define CONFIRM	'c'
+
 Socket *sockcli;
 char svrname[MAXSOCKNAME];
-FILE *nodes_p, *log_p;
-float **nodes;
-int curr_node;
+FILE *nodes_p;
+char *log_fn;
+double **nodes;
+int curr_node=0;
 typedef struct rovMsg_t{
 	char msgType;
-	float lat;
-	float lon;
-	float hdg;
-	float angle;
+	double lat;
+	double lon;
+	double hdg;
+	double angle;
 	int errorType;
 	}rovMsg;
 
@@ -260,6 +268,11 @@ int getNodes(char *filename)
 }
 
 /* rovComm -------------------------------------------------------------------*/
+void collectData(rovMsg* msg)
+{
+	
+}
+
 int rovComm()
 {
 	rovMsg rmsg;
@@ -287,7 +300,7 @@ int rovComm()
 	imsg.angle=0.0;
 	imsg.errorType=0;
 	
-	if(Smaskwait())
+	if(Smaskwait() && Speek(sockcli,buf,1024))
 	{
 		Sscanf(sockcli,"%s",buf);
 			fprintf(stderr, "%s\n", buf);
@@ -300,13 +313,16 @@ int rovComm()
 			fprintf(stderr,"%s\n",tokens[i]);
 			#endif
 		}
+		#if DEBUG
 		printf("%d\n",i);
-		
+		#endif
 		for(j=0;j<i;j++)
 		{
 			if(*tokens[j]=='t')
 			{
+			#if DEBUG
 				printf("%c is the value\n", tokens[j+1][0]);
+			#endif
 				rmsg.msgType=tokens[++j][0];
 				
 			}
@@ -334,22 +350,40 @@ int rovComm()
 		#endif
 		switch(rmsg.msgType)
 			{
-			case 'i': //idle
+			case IDLE: //idle
+				collectData(&rmsg);
+				imsg.msgType=WAYPT;
+				imsg.lat=nodes[curr_node][0];
+				imsg.lon=nodes[curr_node][1];
+				break;
+			case CONFIRM: //confirm
 				
 				break;
-			case 'y': //confirm
-				
+			case WAYPT: //waypoint
+				collectData(&rmsg);
+				imsg.msgType=WAYPT;
+				curr_node++;
+				imsg.lat=nodes[curr_node][0];
+				imsg.lon=nodes[curr_node][1];
 				break;
-			case 'w': //waypoint
-			
+			case ERROR: //error
+				//TODO: Manage error states
 				break;
-			case 'e': //error
-				
+			case REPORT:
+				collectData(&rmsg);
+				imsg.msgType=CONFIRM;
+				break;
+			case NOFIX:
+				imsg.msgType=CONFIRM;
 				break;
 			default:
-				
 				break;
 			}
+		if(imsg.msgType!='x' && rmsg.msgType!=CONFIRM)
+		{
+			Sprintf(sockcli,"t:%c:a:%f:o:%f:h:%f:n:%f:e:%d",
+				imsg.msgType,imsg.lat,imsg.lon,imsg.hdg,imsg.angle,imsg.errorType);
+		}
 	}
 	
 
@@ -365,7 +399,6 @@ int main(int argc, char **argv)
 //RTKROV
 	curr_node=0;
 	sockcli=NULL;
-	log_p=0;
 	nodes_p=0;
 	struct timeval t1,t2;
 	double elapsedTime;
@@ -435,7 +468,10 @@ int main(int argc, char **argv)
         	fclose(nodes_p);
         }
         else if (!strcmp(argv[i],"-lf") &&i+1<argc)
-        	log_p=fopen(argv[++i], "w");
+        {
+        	log_fn=(char*)malloc(sizeof(char)*(1+sizeof(strlen(argv[i]))));
+        	sprintf(log_fn,"%s",argv[i]);
+        }
         
         
         else if (*argv[i]=='-') printhelp();
@@ -542,7 +578,7 @@ int main(int argc, char **argv)
     
 //RTKROV
     Sclose(sockcli);
-    if(log_p)fclose(log_p);
+    
     
     
     

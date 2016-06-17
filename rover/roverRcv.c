@@ -105,6 +105,14 @@ static filopt_t filopt  ={""};          /* file options */
 /* RTKROV --------------------------------------------------------------------*/
 #define SVRNAME "rtkrov"
 #define DEBUG 1
+
+#define IDLE 	'i'
+#define REPORT 	'r'
+#define ERROR	'e'
+#define NOFIX	'n'
+#define WAYPT	'w'
+#define CONFIRM	'c'
+
 Socket *socksvr, *skt;
 typedef struct rovMsg_t{
 	char msgType;
@@ -115,8 +123,8 @@ typedef struct rovMsg_t{
 	int errorType;
 	}rovMsg;
 
-
-
+double wayPt[2];
+int tracking=0;
 
 
 
@@ -1233,20 +1241,44 @@ int rovComm()
 	double pos[2];
 	#if DEBUG
 	retval=1;
-	if(!intflg && Stest(skt)>=0)
-		Sprintf(skt,"t:r:a:1.23:o:4.32");
+	char mType=NOFIX;
+		if(!intflg && Stest(skt)>=0)
+			Sprintf(skt,"t:r:a:1.23:o:4.32");
 	#else
 	rtksvrlock(&svr);
-	if(svr.nsol==0) return 0;
 	else retval=svr.nsol;
-	
-	for (i=0;i<svr.nsol && !intflg;i++)
+	if(svr.nsol)
 	{
-		ecef2pos(svr.solbuf[i].rr,pos);
-		Sprintf(skt,"t:i:a:%f:o:%f",pos[0],pos[1]);
+		for (i=0;i<svr.nsol && !intflg;i++)
+		{
+			if(tracking==0)
+				mType=IDLE;
+			else if(dist(&pos)<MIN_DIF)
+			{
+				mType=WAYPOINT;
+				tracking=0;
+			}
+			else
+			{
+				mType=REPORT;
+			}
+		
+			ecef2pos(svr.solbuf[i].rr,pos);
+			Sprintf(skt,"t:%c:a:%f:o:%f",mType,pos[0],pos[1]);
+			
+		}
 	}
+	else if(0)
+	{
+		mType=ERROR;
+		//TODO: Define an error condition
+		Sprintf(skt,"t:%c:e:%d",mType,0);
+	}
+	
 	svr.nsol=0;
 	rtksvrunlock(&svr);
+	
+	
 	#endif
 	return retval;
 }
