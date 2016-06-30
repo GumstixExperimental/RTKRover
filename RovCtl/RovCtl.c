@@ -143,13 +143,16 @@ int setPwm(pwmStatus *pwm)
 {
 	FILE *fp;
 	char *path=(char*)malloc((strlen(pwm->path)+16)*sizeof(char));
-	
-	sprintf(path,"%s/enable",pwm->path);
-	fp=fopen(path,"w");
-	if(!fp)
-		return 1;
-	fprintf(fp,"%d",0);
-	fclose(fp);
+	if(!pwm->enable)
+	{
+		sprintf(path,"%s/enable",pwm->path);
+		fp=fopen(path,"w");
+		if(!fp)
+			return 1;
+		fprintf(fp,"%d",0);
+		fclose(fp);
+		
+	}
 	
 	sprintf(path,"%s/period",pwm->path);
 	fp=fopen(path,"w");
@@ -164,7 +167,16 @@ int setPwm(pwmStatus *pwm)
 		return 3;
 	fprintf(fp, "%d", pwm->duty);
 	fclose(fp);
-
+	
+	if(pwm->enable)
+	{
+		sprintf(path,"%s/enable",pwm->path);
+		fp=fopen(path, "w");
+		if(!fp)
+			return 1;
+		fprintf(fp, "%d", 1);
+		fclose(fp);
+	}
 	return 0;
 }
 
@@ -222,7 +234,7 @@ void fullStop(pwmStatus *left, pwmStatus *right)
 
 void bankTurn(float ratio, char dir, pwmStatus *left, pwmStatus *right)
 {
-	float abs_l,abs_r;
+	float abs_l,abs_r,curr_spd;
 	short motor_dir;
 	
 	normalize_period(left, right);
@@ -231,20 +243,30 @@ void bankTurn(float ratio, char dir, pwmStatus *left, pwmStatus *right)
 	abs_r=right->duty-right->period/2;
 	
 	if(abs_l>0 && abs_r>0)
-		motor_dir=1;
-	else if(abs_l<0 && abs_r<0)
+	{
 		motor_dir=-1;
+		if(abs_l<abs_r)
+			curr_spd=abs_l;
+		else curr_spd=abs_r;
+	}
+	else if(abs_l<0 && abs_r<0)
+	{
+		motor_dir=1;
+		if(abs_l<abs_r)
+			curr_spd=abs_r;
+		else curr_spd=abs_l;
+	}
 	else return;
 		
-	if(dir=='l' && ratio!=0.0)
+	if(dir=='r' && ratio!=0.0)
 	{
-		left->duty=right->period/2+(motor_dir*abs_r*(1-ratio/100));
-		right->duty=right->period/2+(motor_dir*abs_r);
+		left->duty=right->period/2+(motor_dir*curr_spd*(1-(ratio/2)/100));
+		right->duty=right->period/2+(motor_dir*curr_spd*(1+(ratio/2)/100));
 	}
-	else if(dir=='r' && ratio!=0)
+	else if(dir=='l' && ratio!=0)
 	{
-		right->duty=left->period/2+(motor_dir*abs_l*(1-ratio/100));
-		left->duty=left->period/2+(motor_dir*abs_l);
+		right->duty=left->period/2+(motor_dir*curr_spd*(1-(ratio/2)/100));
+		left->duty=left->period/2+(motor_dir*curr_spd*(1+(ratio/2)/100));
 	}
 	setPwm(left);
 	setPwm(right);
@@ -289,13 +311,13 @@ void drive(float speed, char dir, pwmStatus *left, pwmStatus *right)
 	normalize_period(left,right);
 	short n_dir;
 	if(dir=='f')
-		n_dir=1;
-	else if(dir=='b')
 		n_dir=-1;
+	else if(dir=='b')
+		n_dir=1;
 	else
 		return;
 	
-	left->duty=right->duty=(int)((float)left->period/2*(1.0+(speed/100.0)));
+	left->duty=right->duty=(int)((float)left->period/2*(1.0+(n_dir*(speed/100.0))));
 	left->enable=1;
 	right->enable=1;
 	setPwm(left);
